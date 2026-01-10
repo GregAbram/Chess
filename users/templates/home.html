@@ -1,0 +1,193 @@
+﻿<!DOCTYPE html>
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Home</title>
+</head>
+<body>
+    <div class="container mt-5">
+        <h3>My Home Page</h3>
+        <p>Logged in as: <strong>{{ current_user.username }}</strong> — Win rate: <strong>{{ win_pct }}%</strong></p>
+        <hr>{% if messages %}
+            <h4>Registered Users:</h4>
+            <ul>
+                {% for message in messages %}
+                    <li>{{ message }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+        {% if secret_games %}
+            <h4> Users waiting for a game</h4>
+            <ul>
+                {% for g in secret_games %}
+                    <li>
+                        <a href="{% url 'game_view' game_id=g.id %}">Game {{ g.id }}</a>
+                        — Players:
+                        {% if g.white and g.black %}
+                            {{ g.white.username }}, {{ g.black.username }}
+                        {% elif g.white %}
+                            {{ g.white.username }}
+                        {% elif g.black %}
+                            {{ g.black.username }}
+                        {% else %}
+                            (empty)
+                        {% endif %}
+                        {% if not g.is_full %} <strong>(Open)</strong>{% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+        <h4>Your Active Games</h4>
+        <ul id="user-games-list">
+            {% if user_games %}
+                {% for g in user_games %}
+                    <li>
+                        <a href="{% url 'game_view' game_id=g.id %}">Game {{ g.id }}</a>
+                        — Players:
+                        {% if g.white and g.black %}
+                            {{ g.white.username }}, {{ g.black.username }}
+                        {% elif g.white %}
+                            {{ g.white.username }}
+                        {% elif g.black %}
+                            {{ g.black.username }}
+                        {% else %}
+                            (empty)
+                        {% endif %}
+                        {% comment %} badge when it's this user's turn {% endcomment %}
+                        {% if current_user and g.white and g.white.id == current_user.id and g.white_turn %}
+                            <strong style="color:green; margin-left:8px;">Your move</strong>
+                        {% elif current_user and g.black and g.black.id == current_user.id and not g.white_turn %}
+                            <strong style="color:green; margin-left:8px;">Your move</strong>
+                        {% elif g.over %}
+                            <strong style="margin-left:8px;">(Finished)</strong>
+                        {% elif not g.is_full %}
+                            <strong style="margin-left:8px;">(Open)</strong>
+                        {% endif %}
+                    </li>
+                {% endfor %}
+            {% endif %}
+        </ul>
+        {% if public_games %}
+            <h4>Public Games</h4>
+            <ul>
+                {% for g in public_games %}
+                    <li>
+                        <a href="{% url 'game_view' game_id=g.id %}">Game {{ g.id }}</a>
+                        — Players:
+                        {% if g.white and g.black %}
+                            {{ g.white.username }}, {{ g.black.username }}
+                        {% elif g.white %}
+                            {{ g.white.username }}
+                        {% elif g.black %}
+                            {{ g.black.username }}
+                        {% else %}
+                            (empty)
+                        {% endif %}
+                        {% if not g.is_full %} <strong>(Open)</strong>{% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <p>No public games currently available. Maybe create one?</p>
+        {% endif %}
+        <div style="margin-top:12px;">
+            <form method="post" action="{% url 'create_specific_game' %}">
+                {% csrf_token %}
+                <label for="opponent_username">Create game for specific user:</label>
+                <input id="opponent_username" name="opponent_username" placeholder="Opponent username" />
+                <button type="submit">Create</button>
+            </form>
+            <small>If the opponent is online and visits their Home, they'll see a link to this game.</small>
+        </div>
+        <form method="post" action="{% url 'join_game' %}">
+            {% csrf_token %}
+            <button type="submit">Play / Join Random Game</button>
+        </form>
+        <div style="margin-top:8px;">
+            <form method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button type="submit">Log Out</button>
+            </form>
+        </div>
+        <script>
+            // Poll the server for user's active games and refresh the list every 5s
+            const USER_GAMES_STATE_URL = "{% url 'user_games_state' %}";
+            const CURRENT_USER_ID = {{ current_user.id }};
+
+            function renderUserGamesList(games) {
+                const ul = document.getElementById('user-games-list');
+                if (!ul) return;
+                ul.innerHTML = '';
+                for (const g of games) {
+                    const li = document.createElement('li');
+                    const a = document.createElement('a');
+                    a.href = '/game/' + g.id + '/';
+                    a.textContent = 'Game ' + g.id;
+                    li.appendChild(a);
+                    li.appendChild(document.createTextNode(' — Players: '));
+                    if (g.white_username && g.black_username) {
+                        li.appendChild(document.createTextNode(g.white_username + ', ' + g.black_username));
+                    } else if (g.white_username) {
+                        li.appendChild(document.createTextNode(g.white_username));
+                    } else if (g.black_username) {
+                        li.appendChild(document.createTextNode(g.black_username));
+                    } else {
+                        li.appendChild(document.createTextNode('(empty)'));
+                    }
+                    // Badge
+                    let badge = null;
+                    if (g.white_id === CURRENT_USER_ID && g.white_turn) {
+                        badge = document.createElement('strong');
+                        badge.style.color = 'green';
+                        badge.style.marginLeft = '8px';
+                        badge.textContent = 'Your move';
+                    } else if (g.black_id === CURRENT_USER_ID && !g.white_turn) {
+                        badge = document.createElement('strong');
+                        badge.style.color = 'green';
+                        badge.style.marginLeft = '8px';
+                        badge.textContent = 'Your move';
+                    } else if (g.over) {
+                        badge = document.createElement('strong');
+                        badge.style.marginLeft = '8px';
+                        badge.textContent = '(Finished)';
+                    } else if (!g.is_full) {
+                        badge = document.createElement('strong');
+                        badge.style.marginLeft = '8px';
+                        badge.textContent = '(Open)';
+                    }
+                    if (badge) li.appendChild(badge);
+                    ul.appendChild(li);
+                }
+            }
+
+            async function fetchAndRenderUserGames() {
+                try {
+                    const r = await fetch(USER_GAMES_STATE_URL + '?t=' + Date.now(), { credentials: 'same-origin', cache: 'no-store' });
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    const d = await r.json();
+                    console.log('user_games_state response', d);
+                    if (d && d.debug) console.log('user_games_state debug:', d.debug);
+                    if (d && d.games) {
+                        // debug: show current ids vs incoming ids
+                        const existingIds = Array.from(document.querySelectorAll('#user-games-list a')).map(a => parseInt(a.href.split('/').slice(-2, -1)[0]));
+                        const incomingIds = d.games.map(x => x.id);
+                        console.log('user_games: existingIds=', existingIds, 'incomingIds=', incomingIds);
+                        if (d.debug && d.debug.user_id !== CURRENT_USER_ID) {
+                            console.warn('Mismatch: page CURRENT_USER_ID=', CURRENT_USER_ID, 'server user_id=', d.debug.user_id, 'authenticated=', d.debug.authenticated);
+                        }
+                        renderUserGamesList(d.games);
+                    }
+                } catch (e) {
+                    console.error('fetchAndRenderUserGames failed', e);
+                }
+            }
+
+            try { fetchAndRenderUserGames(); } catch (e) {}
+            setInterval(fetchAndRenderUserGames, 5000);
+        </script>
+        
+    </div>
+</body>
+</html>

@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>AJAX Echo</title>
+</head>
+<body>
+  <h1>AJAX Echo</h1>
+  <input id="textInput" placeholder="Type text to send" style="width:300px" />
+  <button id="sendBtn">Send</button>
+  <div id="result" style="margin-top:1em;color:green"></div>
+
+<script>
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+}
+
+const sendBtn = document.getElementById('sendBtn');
+const input = document.getElementById('textInput');
+const result = document.getElementById('result');
+
+sendBtn.addEventListener('click', async () => {
+  const text = input.value;
+  try {
+    const res = await fetch("/users/ajax/echo/", {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken') || ''
+      },
+      body: JSON.stringify({text})
+    });
+    const data = await res.json();
+    if (res.ok) {
+      result.textContent = 'Echo: ' + data.echo;
+    } else {
+      result.textContent = 'Error: ' + (data.error || JSON.stringify(data));
+      result.style.color = 'red';
+    }
+  } catch (e) {
+    result.textContent = 'Request failed: ' + e;
+    result.style.color = 'red';
+  }
+});
+</script>
+</body>
+</html>

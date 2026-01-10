@@ -1,2 +1,2 @@
-# Test
-Test
+# Chess
+Chess application for an online variant

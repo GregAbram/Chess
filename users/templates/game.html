@@ -1,0 +1,874 @@
+{% load static %}
+<!DOCTYPE html>
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <script src="{% static 'chess.js' %}"></script>
+    <script>
+        // Quick sanity check that chess.js loaded and exported Board
+        console.log('chess.js load check:', typeof Board !== 'undefined' ? 'Board OK' : 'Board MISSING');
+    </script>
+    <meta charset="utf-8" />
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <!-- Prefer light color scheme to avoid browser forced-dark overrides -->
+    <meta name="color-scheme" content="light">
+    <style>
+        /* Opt-out of forced color adjustments (Windows High Contrast / browser force-dark) */
+        html { color-scheme: light; forced-color-adjust: none; }
+    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+        :root {
+            --board-size: 85vmin; /* Board size: 85% of the smaller viewport dimension (width or height) */
+            --edge-size: calc(var(--board-size) * .05);
+            --gap-size: calc(var(--board-size) * .005);
+            /* 8 squares + 2 edges = 10 tracks, 9 gaps between them */
+            --square-size: calc((var(--board-size) - 2 * var(--edge-size) - 9 * var(--gap-size)) / 8);
+            --light-square: darkgray;
+            --dark-square: dimgray;
+            --label-bg: rgba(0,0,0,0.0);
+            --light-text: #111;
+            --dark-text: #fff;
+            --board-bg: #0b0b0b;
+            --piece-white: #ffffff;
+            --piece-black: black;
+        }
+
+        /* Use border-box so borders/gaps don't unexpectedly expand tiles */
+        * { box-sizing: border-box; }
+
+        .board {
+            width: var(--board-size);
+            height: var(--board-size);
+            border: 2px solid #333;
+            display: grid;
+            grid-template-columns: var(--edge-size) repeat(8, var(--square-size)) var(--edge-size);
+            grid-template-rows: var(--edge-size) repeat(8, var(--square-size)) var(--edge-size);
+            gap: var(--gap-size);
+            background-color: var(--board-bg);
+        }
+
+        /* Flip board for black perspective while keeping glyphs/labels upright */
+        .board.flipped {
+            transform: rotate(180deg);
+        }
+        .board.flipped button,
+        .board.flipped .vertical-white-edge,
+        .board.flipped .vertical-black-edge,
+        .board.flipped .horizontal-white-edge,
+        .board.flipped .horizontal-black-edge,
+        .board.flipped .corner {
+            transform: rotate(180deg);
+        }
+
+        /* Grid tracks control sizing now — remove per-cell borders */
+        .white-square, .black-square, .corner,
+        .vertical-white-edge, .vertical-black-edge,
+        .horizontal-white-edge, .horizontal-black-edge {
+            border: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        /* Make square buttons fill grid cells and show explicit backgrounds */
+        button.white-square, button.black-square {
+            -webkit-appearance: none;
+            appearance: none;
+            border: none;
+            padding: 0;
+            margin: 0;
+            cursor: pointer;
+            font-family: inherit;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            line-height: 1;
+            box-sizing: border-box;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        /* Ensure glyph contrast and explicit backgrounds on buttons (use CSS variables)
+           and allow flipped board to visually swap light/dark without changing DOM classes. */
+        button.white-square { background-color: var(--light-square); color: var(--light-text); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12); border: 1px solid rgba(0,0,0,0.12); }
+        button.black-square { background-color: var(--dark-square); color: var(--dark-text); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); }
+        /* Do not swap light/dark via CSS when flipped; keep DOM classes authoritative */
+        .corner { background-color: green; }
+        /* Center edge labels and use a medium gray between lightgray and rgb(54,54,54) */
+        .vertical-white-edge{ background-color: lightgray; display:flex; align-items:center; justify-content:center; color:black; }
+        .vertical-black-edge{ background-color: rgb(54, 54, 54); display:flex; align-items:center; justify-content:center; color:white; }
+        .horizontal-white-edge{ background-color: lightgray; display:flex; align-items:center; justify-content:center; color:black; }
+        .horizontal-black-edge{ background-color: rgb(54, 54, 54); display:flex; align-items:center; justify-content:center; color:white; }
+        .console {
+            width: var(--board-size);
+            box-sizing: border-box;
+            padding: 8px;
+            background: #ffffff;
+            color: #000000;
+            border-radius: 6px;
+            overflow: auto;
+            max-height: calc(var(--board-size) * 0.15);
+        }
+        /* White piece outline: 1px black stroke with fallback shadows */
+        .white-piece-outline {
+            text-shadow: -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000;
+        }
+        /* Black piece outline: 1px white stroke with fallback shadows */
+        .black-piece-outline {
+            text-shadow: -2px 0 0 #fff, 2px 0 0 #fff, 0 -2px 0 #fff, 0 2px 0 #fff;
+        }
+        
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <hr>
+        {% if game %}
+            <!-- expose current logged-in user id for client-side scripts -->
+            <input type="hidden" id="current-user-id" value="{{ current_user_id }}" />
+            <input type="hidden" id="game-id" value="{{ game.id }}" />
+            <input type="hidden" id="user-color" value="{% if game.white and game.white.id == current_user_id %}white{% elif game.black and game.black.id == current_user_id %}black{% else %}spectator{% endif %}">
+            <input type="hidden" id="white-turn" value="{% if game.white_turn %}true{% else %}false{% endif %}">
+            <input type="hidden" id="game-full" value="{% if game.white and game.black %}true{% else %}false{% endif %}">
+            <input type="hidden" id="white-player-id" value="{% if game.white %}{{ game.white.id }}{% endif %}">
+            <input type="hidden" id="white-player-username" value="{% if game.white %}{{ game.white.username|escapejs }}{% endif %}">
+            <input type="hidden" id="black-player-id" value="{% if game.black %}{{ game.black.id }}{% endif %}">
+            <input type="hidden" id="black-player-username" value="{% if game.black %}{{ game.black.username|escapejs }}{% endif %}">
+            <script>
+                // Ensure a global GAME_STATE_URL is available before DOMContentLoaded
+                window.GAME_STATE_URL = "{% url 'game_state' game.id %}";
+                // Provide a safe noop sync function in case callers invoke it
+                // before the real implementation is attached during DOMContentLoaded.
+                if (!window.syncWithServer) {
+                    window.syncWithServer = function() { console.log('syncWithServer: placeholder called before init'); return Promise.resolve(); };
+                }
+            </script>
+            <div class="board" id="chess-board">
+                <!-- Canonical white-oriented 10x10 grid: corners, vertical labels, 8x8 squares, horizontal labels -->
+                <div class="corner"></div>
+                <div class="vertical-black-edge">A</div>
+                <div class="vertical-white-edge">B</div>
+                <div class="vertical-black-edge">C</div>
+                <div class="vertical-white-edge">D</div>
+                <div class="vertical-black-edge">E</div>
+                <div class="vertical-white-edge">F</div>
+                <div class="vertical-black-edge">G</div>
+                <div class="vertical-white-edge">H</div>
+                <div class="corner"></div>
+
+                <div class="horizontal-black-edge">8</div>
+                <button class="white-square" id="a8" type="button"></button>
+                <button class="black-square" id="b8" type="button"></button>
+                <button class="white-square" id="c8" type="button"></button>
+                <button class="black-square" id="d8" type="button"></button>
+                <button class="white-square" id="e8" type="button"></button>
+                <button class="black-square" id="f8" type="button"></button>
+                <button class="white-square" id="g8" type="button"></button>
+                <button class="black-square" id="h8" type="button"></button>
+                <div class="horizontal-white-edge">8</div>
+
+                <div class="horizontal-white-edge">7</div>
+                <button class="black-square" id="a7" type="button"></button>
+                <button class="white-square" id="b7" type="button"></button>
+                <button class="black-square" id="c7" type="button"></button>
+                <button class="white-square" id="d7" type="button"></button>
+                <button class="black-square" id="e7" type="button"></button>
+                <button class="white-square" id="f7" type="button"></button>
+                <button class="black-square" id="g7" type="button"></button>
+                <button class="white-square" id="h7" type="button"></button>
+                <div class="horizontal-black-edge">7</div>
+
+                <div class="horizontal-black-edge">6</div>
+                <button class="white-square" id="a6" type="button"></button>
+                <button class="black-square" id="b6" type="button"></button>
+                <button class="white-square" id="c6" type="button"></button>
+                <button class="black-square" id="d6" type="button"></button>
+                <button class="white-square" id="e6" type="button"></button>
+                <button class="black-square" id="f6" type="button"></button>
+                <button class="white-square" id="g6" type="button"></button>
+                <button class="black-square" id="h6" type="button"></button>
+                <div class="horizontal-white-edge">6</div>
+
+                <div class="horizontal-white-edge">5</div>
+                <button class="black-square" id="a5" type="button"></button>
+                <button class="white-square" id="b5" type="button"></button>
+                <button class="black-square" id="c5" type="button"></button>
+                <button class="white-square" id="d5" type="button"></button>
+                <button class="black-square" id="e5" type="button"></button>
+                <button class="white-square" id="f5" type="button"></button>
+                <button class="black-square" id="g5" type="button"></button>
+                <button class="white-square" id="h5" type="button"></button>
+                <div class="horizontal-black-edge">5</div>
+
+                <div class="horizontal-black-edge">4</div>
+                <button class="white-square" id="a4" type="button"></button>
+                <button class="black-square" id="b4" type="button"></button>
+                <button class="white-square" id="c4" type="button"></button>
+                <button class="black-square" id="d4" type="button"></button>
+                <button class="white-square" id="e4" type="button"></button>
+                <button class="black-square" id="f4" type="button"></button>
+                <button class="white-square" id="g4" type="button"></button>
+                <button class="black-square" id="h4" type="button"></button>
+                <div class="horizontal-white-edge">4</div>
+
+                <div class="horizontal-white-edge">3</div>
+                <button class="black-square" id="a3" type="button"></button>
+                <button class="white-square" id="b3" type="button"></button>
+                <button class="black-square" id="c3" type="button"></button>
+                <button class="white-square" id="d3" type="button"></button>
+                <button class="black-square" id="e3" type="button"></button>
+                <button class="white-square" id="f3" type="button"></button>
+                <button class="black-square" id="g3" type="button"></button>
+                <button class="white-square" id="h3" type="button"></button>
+                <div class="horizontal-black-edge">3</div>
+
+                <div class="horizontal-black-edge">2</div>
+                <button class="white-square" id="a2" type="button"></button>
+                <button class="black-square" id="b2" type="button"></button>
+                <button class="white-square" id="c2" type="button"></button>
+                <button class="black-square" id="d2" type="button"></button>
+                <button class="white-square" id="e2" type="button"></button>
+                <button class="black-square" id="f2" type="button"></button>
+                <button class="white-square" id="g2" type="button"></button>
+                <button class="black-square" id="h2" type="button"></button>
+                <div class="horizontal-white-edge">2</div>
+
+                <div class="horizontal-white-edge">1</div>
+                <button class="black-square" id="a1" type="button"></button>
+                <button class="white-square" id="b1" type="button"></button>
+                <button class="black-square" id="c1" type="button"></button>
+                <button class="white-square" id="d1" type="button"></button>
+                <button class="black-square" id="e1" type="button"></button>
+                <button class="white-square" id="f1" type="button"></button>
+                <button class="black-square" id="g1" type="button"></button>
+                <button class="white-square" id="h1" type="button"></button>
+                <div class="horizontal-black-edge">1</div>
+
+                <div class="corner"></div>
+                <div class="vertical-white-edge">A</div>
+                <div class="vertical-black-edge">B</div>
+                <div class="vertical-white-edge">C</div>
+                <div class="vertical-black-edge">D</div>
+                <div class="vertical-white-edge">E</div>
+                <div class="vertical-black-edge">F</div>
+                <div class="vertical-white-edge">G</div>
+                <div class="vertical-black-edge">H</div>
+                <div class="corner"></div>
+            </div>
+            </div>
+            <div class="console" id="game-console" style="padding:8px; overflow:auto; font-family: monospace; background: #ffffff; color: #000000; border-radius:6px; max-height: calc(var(--board-size) * 0.15); width: var(--board-size); box-sizing: border-box;">
+            </div>
+            <form method="post" action="{% url 'leave_game' %}">
+                {% csrf_token %}
+                <button type="submit">Return to Home</button>
+                <button type="button" id="rematch-btn" style="display:none; margin-left:8px;" disabled>Request Rematch</button>
+                <span id="rematch-status" style="margin-left:8px;"></span>
+            </form>
+        {% else %}
+            <p>No game data available.</p>
+        {% endif %}
+    </div>
+    <script>
+        // Promotion chooser UI: returns a Promise that resolves to a PieceType value.
+        (function () {
+            // Create chooser element and append to body
+            const chooser = document.createElement('div');
+            chooser.id = 'promotion-chooser';
+            chooser.style.position = 'fixed';
+            chooser.style.left = '50%';
+            chooser.style.top = '50%';
+            chooser.style.transform = 'translate(-50%, -50%)';
+            chooser.style.display = 'none';
+            chooser.style.gap = '8px';
+            chooser.style.padding = '8px';
+            chooser.style.background = 'rgba(0,0,0,0.85)';
+            chooser.style.borderRadius = '8px';
+            chooser.style.zIndex = 9999;
+            // Buttons: Q, R, B, N
+            const pieces = [ ['Q','QUEEN'], ['R','ROOK'], ['B','BISHOP'], ['N','KNIGHT'] ];
+            pieces.forEach(([label, key]) => {
+                const btn = document.createElement('button');
+                btn.textContent = label;
+                btn.style.minWidth = '44px';
+                btn.style.fontSize = '18px';
+                btn.style.padding = '6px 10px';
+                btn.dataset.promotion = key;
+                chooser.appendChild(btn);
+            });
+            document.body.appendChild(chooser);
+
+            // Expose global askPromotion function used by chess.js
+            window.askPromotion = function () {
+                return new Promise((resolve) => {
+                    chooser.style.display = 'flex';
+                    // handlers
+                    const onClick = (e) => {
+                        const key = e.target && e.target.dataset && e.target.dataset.promotion;
+                        let val = PieceType.QUEEN;
+                        switch (key) {
+                            case 'QUEEN': val = PieceType.QUEEN; break;
+                            case 'ROOK': val = PieceType.ROOK; break;
+                            case 'BISHOP': val = PieceType.BISHOP; break;
+                            case 'KNIGHT': val = PieceType.KNIGHT; break;
+                        }
+                        cleanup();
+                        resolve(val);
+                    };
+                    const cleanup = () => {
+                        chooser.style.display = 'none';
+                        chooser.removeEventListener('click', onClick);
+                    };
+                    chooser.addEventListener('click', onClick);
+                });
+            };
+        })();
+        // Populate the existing board squares with the unicode piece glyphs
+        document.addEventListener('DOMContentLoaded', function () {
+            console.log('DOM ready: starting board population');
+            try {
+                const board = new Board();
+                // Expose board early so async poll handlers can reference it
+                window.board = board;
+                console.log('Board instance created and exposed as window.board');
+                board.see_board();
+                console.log('see_board() called');
+                // Flip visual board if current user is playing Black
+                // Read the current user's color from the hidden input
+                const userColorEl = document.getElementById('user-color');
+                const userColor = userColorEl ? userColorEl.value : 'spectator';
+                console.log('user-color:', userColor);
+                const boardEl = document.querySelector('.board');
+                console.log('board element found:', !!boardEl);
+                if (userColor === 'black' && boardEl) {
+                    // Only rotate the board for black perspective; do NOT swap
+                    // square color classes here. Rotation plus the per-button
+                    // counter-rotation in CSS keeps glyphs upright while
+                    // preserving the intended light/dark pattern.
+                    boardEl.classList.add('flipped');
+                    console.log('board flipped for black (no class-swap)');
+                }
+
+                // Render pieces from the `board` data into the DOM. Extracted
+                // into a function so it can be re-used when the game becomes full
+                // after a second player joins.
+                function renderPieces() {
+                    let placed = 0;
+                    let missing = 0;
+                    const flippedView = boardEl && boardEl.classList.contains('flipped');
+                    for (let r = 0; r < 8; r++) {
+                        for (let c = 0; c < 8; c++) {
+                            const sq = board.squares[r][c];
+                            const colLetter = String.fromCharCode(97 + c);
+                            const id = `${colLetter}${r + 1}`;
+                            const el = document.getElementById(id);
+                            if (el) {
+                                const gameFullEl = document.getElementById('game-full');
+                                const gameFull = gameFullEl ? (gameFullEl.value === 'true') : true;
+                                if (gameFull && sq.piece && sq.piece.type !== PieceType.EMPTY) {
+                                    let glyph = '';
+                                    if (sq.piece.color == PieceColor.WHITE) {
+                                        switch (sq.piece.type) {
+                                            case PieceType.KING: glyph = '\u265A'; break;
+                                            case PieceType.QUEEN: glyph = '\u265B'; break;
+                                            case PieceType.ROOK: glyph = '\u265C'; break;
+                                            case PieceType.BISHOP: glyph = '\u265D'; break;
+                                            case PieceType.KNIGHT: glyph = '\u265E'; break;
+                                            case PieceType.PAWN: glyph = '\u265F'; break;
+                                            default: glyph = sq.piece.unicodeChar();
+                                        }
+                                    } else {
+                                        glyph = sq.piece.unicodeChar();
+                                    }
+                                    el.textContent = glyph;
+                                    placed += 1;
+                                } else {
+                                    el.textContent = '';
+                                }
+                                el.style.display = 'flex';
+                                el.style.alignItems = 'center';
+                                el.style.justifyContent = 'center';
+                                el.style.fontSize = 'calc(var(--square-size) * 0.6)';
+
+                                const rootStyles = getComputedStyle(document.documentElement);
+                                const light = (rootStyles.getPropertyValue('--light-square') || '#f0d9b5').trim();
+                                const dark = (rootStyles.getPropertyValue('--dark-square') || '#b58863').trim();
+                                const lightText = (rootStyles.getPropertyValue('--light-text') || '#111').trim();
+                                const darkText = (rootStyles.getPropertyValue('--dark-text') || '#fff').trim();
+                                const isWhite = el.classList.contains('white-square');
+                                el.style.backgroundColor = isWhite ? light : dark;
+                                if (sq.piece && sq.piece.type !== PieceType.EMPTY) {
+                                    const pieceWhite = (rootStyles.getPropertyValue('--piece-white') || '#ffffff').trim();
+                                    const pieceBlack = (rootStyles.getPropertyValue('--piece-black') || '#000000').trim();
+                                    el.style.color = (sq.piece.color == PieceColor.WHITE) ? pieceWhite : pieceBlack;
+                                    if (sq.piece.color == PieceColor.WHITE) {
+                                        el.classList.add('white-piece-outline');
+                                        el.classList.remove('black-piece-outline');
+                                    } else {
+                                        el.classList.add('black-piece-outline');
+                                        el.classList.remove('white-piece-outline');
+                                    }
+                                } else {
+                                    el.style.color = isWhite ? lightText : darkText;
+                                    el.classList.remove('white-piece-outline');
+                                    el.classList.remove('black-piece-outline');
+                                }
+                                el.style.width = '100%';
+                                el.style.height = '100%';
+                            }
+                            else {
+                                missing += 1;
+                                console.debug('Missing DOM element for', id, '(row,col)=', r, c);
+                            }
+                        }
+                    }
+                    console.log('pieces placed:', placed, 'missing elements:', missing);
+                    window.board = board;
+                }
+                // Initial render
+                renderPieces();
+
+                // Console helpers: show/hide/write messages to the console area below the board
+                const escapeHtml = (unsafe) => {
+                    return String(unsafe)
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#039;');
+                };
+                window.showConsole = function(text, append = false) {
+                    try {
+                        const el = document.getElementById('game-console');
+                        if (!el) return;
+                        if (!append) el.innerHTML = '';
+                        const line = document.createElement('div');
+                        line.innerHTML = escapeHtml(text);
+                        el.appendChild(line);
+                        el.style.display = 'block';
+                        el.scrollTop = el.scrollHeight;
+                    } catch (e) { console.error('showConsole error', e); }
+                };
+                window.hideConsole = function() { try { const el = document.getElementById('game-console'); if (el) el.style.display = 'none'; } catch(e){} };
+                window.clearConsole = function() { try { const el = document.getElementById('game-console'); if (el) el.innerHTML = ''; } catch(e){} };
+                // writeConsole: clear the console and write a single clean line
+                window.writeConsole = function(text) {
+                    try {
+                        const el = document.getElementById('game-console');
+                        if (!el) return;
+                        // Clear console first (explicitly satisfy step 1)
+                        try { el.innerHTML = ''; } catch (_) { /* ignore */ }
+                        // Normalize to a single line (replace newlines with space)
+                        const line = String(text).replace(/\r?\n+/g, ' ').trim();
+                        // Use textContent to avoid HTML injection and ensure plain text
+                        el.textContent = line;
+                        el.style.display = 'block';
+                        el.scrollTop = el.scrollHeight;
+                    } catch (e) { console.error('writeConsole error', e); }
+                };
+
+                // Provide lightweight player objects so Board can check turns
+                const whitePlayer = {
+                    id: (function(){ const v = document.getElementById('white-player-id'); return v && v.value ? parseInt(v.value,10) : null; })(),
+                    username: (function(){ const v = document.getElementById('white-player-username'); return v && v.value ? v.value : ''; })(),
+                    get_color() { return PieceColor.WHITE; }
+                };
+                const blackPlayer = {
+                    id: (function(){ const v = document.getElementById('black-player-id'); return v && v.value ? parseInt(v.value,10) : null; })(),
+                    username: (function(){ const v = document.getElementById('black-player-username'); return v && v.value ? v.value : ''; })(),
+                    get_color() { return PieceColor.BLACK; }
+                };
+                board.white = whitePlayer;
+                board.black = blackPlayer;
+                if (userColor === 'white') {
+                    board.user = whitePlayer;
+                } else if (userColor === 'black') {
+                    board.user = blackPlayer;
+                } else {
+                    board.user = null;
+                }
+                // Set active player based on server-side `white_turn`
+                const whiteTurnEl = document.getElementById('white-turn');
+                const whiteTurn = whiteTurnEl ? (whiteTurnEl.value === 'true') : true;
+                board.active_player = whiteTurn ? board.white : board.black;
+
+                // If the user is the active player, start move handling to accept clicks
+                try {
+                    console.log('board.user:', board.user, 'board.active_player:', board.active_player);
+                    if (board.user !== null && board.user === board.active_player) {
+                        console.log('Starting move_handling loop for user');
+                        // Fire-and-forget async handler
+                        board.move_handling().catch(e => console.error('move_handling error:', e));
+                    } else {
+                        console.log('Not starting move loop: user not active player');
+                    }
+                } catch (e) {
+                    console.error('Error starting move loop:', e);
+                }
+
+                // Lightweight click logger to verify clicks reach the DOM
+                document.addEventListener('click', (ev) => {
+                    const t = ev.target;
+                    if (t && t.id && (t.classList && (t.classList.contains('white-square') || t.classList.contains('black-square')))) {
+                        console.log('Square clicked:', t.id, 'classes:', t.className);
+                    }
+                });
+
+                // Expose a global game state URL and sync helper so other handlers
+                // (including the move submit flow) can re-sync if the server
+                // rejects a locally-applied move.
+                window.GAME_STATE_URL = "{% url 'game_state' game.id %}";
+                // Expose game id and result endpoints for client-side endgame handling
+                window.GAME_ID = (function(){ const el = document.getElementById('game-id'); return el && el.value ? parseInt(el.value,10) : null; })();
+                window.DECLARE_WIN_URL = "{% url 'declare_win' %}";
+                window.DECLARE_DRAW_URL = "{% url 'declare_draw' %}";
+                window.syncWithServer = function() {
+                    const b = window.board || (typeof board !== 'undefined' ? board : null);
+                    if (!b) return Promise.resolve();
+                    return fetch(window.GAME_STATE_URL, { credentials: 'same-origin' })
+                        .then(r => r.json())
+                        .then(d => {
+                            try {
+                                b._suppress_post = true;
+                                const moves = d.move_list || [];
+                                for (let i = 0; i < moves.length; i++) {
+                                    try { b.execute_other_move(moves[i]); } catch (e) { /* ignore per-move errors */ }
+                                }
+                            } finally {
+                                b._suppress_post = false;
+                            }
+                            try { b.see_board(); } catch (e) {}
+                            if (typeof renderPieces === 'function') {
+                                try { renderPieces(); } catch (e) {}
+                            }
+                        }).catch(e => console.error('syncWithServer failed', e));
+                };
+
+                    // Immediately sync once on load so spectators/non-active players
+                    // see the current state without waiting for the first poll interval.
+                    try { window.syncWithServer().catch(e => console.error('initial sync failed', e)); } catch (e) { console.error('initial sync invocation failed', e); }
+
+                    // Rematch button handling: POSTs to rematch endpoint and updates UI.
+                    (function(){
+                        const rematchBtn = document.getElementById('rematch-btn');
+                        const rematchStatus = document.getElementById('rematch-status');
+                        if (!rematchBtn) return;
+                        rematchBtn.addEventListener('click', function(){
+                            const gameIdEl = document.getElementById('game-id');
+                            const gameId = gameIdEl && gameIdEl.value ? gameIdEl.value : null;
+                            if (!gameId) { if (window.writeConsole) window.writeConsole('Rematch: missing game id'); return; }
+                            const url = "{% url 'rematch_request' game.id %}";
+                            function getCookie(name) { const value = `; ${document.cookie}`; const parts = value.split(`; ${name}=`); if (parts.length === 2) return parts.pop().split(';').shift(); }
+                            const csrf = getCookie('csrftoken') || (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+                            fetch(url, {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+                                body: JSON.stringify({})
+                            }).then(r => r.json()).then(d => {
+                                if (d && d.error) {
+                                    if (window.writeConsole) window.writeConsole('Rematch error: ' + d.error);
+                                    return;
+                                }
+                                if (d && d.both_requested && d.new_game_id) {
+                                    if (window.writeConsole) window.writeConsole('Both players requested rematch — redirecting...');
+                                    // Redirect to the newly-created game
+                                    window.location.href = '/users/game/' + d.new_game_id + '/';
+                                } else {
+                                    if (rematchStatus) rematchStatus.textContent = (d && d.both_requested) ? 'Both requested' : ((d && (d.rematch_white_requested || d.rematch_black_requested)) ? 'Requested' : '');
+                                    if (window.writeConsole) window.writeConsole('Rematch requested. Waiting for opponent...');
+                                }
+                            }).catch(e => { console.error('rematch request failed', e); if (window.writeConsole) window.writeConsole('Rematch request failed: ' + (e && e.message ? e.message : e)); });
+                        });
+                    })();
+
+                // Hook into the board's actually_make_move to POST moves to server
+                (function () {
+                    function getCookie(name) {
+                        const value = `; ${document.cookie}`;
+                        const parts = value.split(`; ${name}=`);
+                        if (parts.length === 2) return parts.pop().split(';').shift();
+                    }
+                    // Fallback: prefer cookie, otherwise look for meta tag set by server
+                    function getCsrfToken() {
+                        const fromCookie = getCookie('csrftoken');
+                        if (fromCookie) return fromCookie;
+                        const meta = document.querySelector('meta[name="csrf-token"]');
+                        if (meta && meta.content) return meta.content;
+                        return '';
+                    }
+                    const submitUrl = "{% url 'submit_move' %}" || '/users/move/';
+                    console.log('submit_move URL resolved to:', submitUrl);
+                    const orig = Board.prototype.actually_make_move;
+                    Board.prototype.actually_make_move = function(fromSquare, toSquare, promotionType) {
+                        // Compute the move string before applying it
+                        let moveStr = this.move_to_string(fromSquare, toSquare, promotionType);
+                        console.log('actually_make_move called, move=', moveStr);
+                        // Call original move logic
+                        orig.call(this, fromSquare, toSquare, promotionType);
+                        // Update DOM immediately
+                        try { this.see_board(); } catch (e) {}
+                        // If this board has suppression flag set, do not POST (used
+                        // when applying server-originated moves during polling).
+                        if (this._suppress_post) {
+                            return;
+                        }
+                        // Send move to server (with enhanced logging for debugging)
+                        try {
+                            const payload = { move: moveStr };
+                            console.log('Posting move to server:', submitUrl, payload);
+                            fetch(submitUrl, {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-CSRFToken': getCsrfToken() || ''
+                                },
+                                body: JSON.stringify(payload)
+                            }).then(resp => {
+                                console.log('move POST response status:', resp.status, 'url:', submitUrl);
+                                const ct = resp.headers.get('content-type') || '';
+                                if (!ct.includes('application/json')) {
+                                    return resp.text().then(text => { console.warn('move POST returned non-JSON response:', text); return {__raw_text: text, status: resp.status}; });
+                                }
+                                return resp.json();
+                            }).then(data => {
+                                    if (data && data.error) {
+                                        console.error('Server rejected move:', data.error, 'raw:', data && data.__raw_text);
+                                        try { window.syncWithServer(); } catch (e) { console.error('Failed to sync after move rejection', e); }
+                                    } else {
+                                        console.log('move POST accepted', data);
+                                        try { window.syncWithServer(); } catch (e) { console.error('Failed to sync after move success', e); }
+                                    }
+                            }).catch(err => {
+                                console.error('Move POST failed:', err);
+                                try { window.syncWithServer(); } catch (e) { console.error('Failed to sync after POST error', e); }
+                            });
+                        } catch (e) {
+                            console.error('Failed sending move:', e);
+                        }
+                    };
+                })();
+            } catch (e) {
+                console.error('Error populating chess squares:', e);
+            }
+                // Poll the server for game state so opponent moves appear without
+                // needing a manual refresh. On first poll we replay the entire
+                // `move_list` to bring the local board up-to-date, then apply
+                // incremental moves. Suppress POSTs while applying server moves.
+                (function() {
+                    const stateUrl = "{% url 'game_state' game.id %}";
+                    let applied = 0;
+                    const applyMoves = (moves) => {
+                        const b = window.board || (typeof board !== 'undefined' ? board : null);
+                        console.log('applyMoves called: moves_len=', moves ? moves.length : 0, 'applied=', applied, 'board_present=', !!b);
+                        if (!moves || !moves.length || !b) return;
+
+                        // If our applied index already equals server length, but the
+                        // local board doesn't contain the server's latest move, reset
+                        // `applied` to force a full replay from the start.
+                        if (applied === moves.length && moves.length > 0) {
+                            try {
+                                const lastMove = moves[moves.length - 1];
+                                const parsed = b.string_to_move(lastMove);
+                                const src = parsed.fromSquare;
+                                if (!src || !src.piece || src.piece.type === PieceType.EMPTY) {
+                                    console.log('Detected missing server move on local board, resetting applied to 0 to replay:', lastMove);
+                                    applied = 0;
+                                }
+                            } catch (e) {
+                                console.log('Could not verify last server move on board, resetting applied to 0', e);
+                                applied = 0;
+                            }
+                        }
+
+                        // Replay entire move list each poll. `execute_other_move`
+                        // is defensive and will skip already-applied moves, so
+                        // re-playing from the start is safe and avoids subtle
+                        // applied-index mismatch bugs that required hard refresh.
+                        b._suppress_post = true;
+                        try {
+                            for (let i = 0; i < moves.length; i++) {
+                                try {
+                                    console.log('Applying server move index=', i, 'move=', moves[i]);
+                                    b.execute_other_move(moves[i]);
+                                } catch (e) {
+                                    console.error('Failed to apply server move', moves[i], e);
+                                }
+                            }
+                            applied = moves.length;
+                            console.log('applyMoves finished, applied now=', applied);
+                            b.see_board();
+                            if (typeof renderPieces === 'function') renderPieces();
+                        } finally {
+                            b._suppress_post = false;
+                        }
+                    };
+                    // Initial fetch + periodic polling with improved error logging
+                    let pollTimer = null;
+                    const doFetchState = () => {
+                        console.log('doFetchState: fetching', stateUrl);
+                        fetch(stateUrl, { credentials: 'same-origin' }).then(r => {
+                            // If the game was removed on the server, return a JSON 404
+                            // rather than a Django HTML 404 page. Handle 404 by
+                            // showing a banner and stopping further polling.
+                            if (r.status === 404) {
+                                const msg = 'Game not found (it may have been removed)';
+                                try { if (typeof window !== 'undefined' && window.writeConsole) window.writeConsole(msg); else console.log(msg); } catch(e) { console.log(msg); }
+                                if (pollTimer) clearInterval(pollTimer);
+                                return Promise.reject(new Error('Game not found (404)'));
+                            }
+                            if (!r.ok) {
+                                return r.text().then(text => { throw new Error('HTTP ' + r.status + ': ' + text); });
+                            }
+                            const ct = r.headers.get('content-type') || '';
+                            if (!ct.includes('application/json')) {
+                                return r.text().then(text => { throw new Error('Non-JSON response: ' + text); });
+                            }
+                            return r.json();
+                        }).then(d => {
+                            console.log('game_state poll result:', d);
+                            applyMoves(d.move_list || []);
+                            // Reveal rematch UI only when the game is over and show endgame message to both players
+                            try {
+                                const rematchBtn = document.getElementById('rematch-btn');
+                                const rematchStatus = document.getElementById('rematch-status');
+                                if (rematchBtn) {
+                                    if (d && d.over) {
+                                        rematchBtn.style.display = 'inline-block';
+                                        rematchBtn.disabled = false;
+                                        if (rematchStatus) rematchStatus.textContent = 'Game over';
+                                    } else {
+                                        rematchBtn.style.display = 'none';
+                                        rematchBtn.disabled = true;
+                                        if (rematchStatus) rematchStatus.textContent = '';
+                                    }
+                                }
+
+                                // Show canonical endgame message to all clients when over
+                                if (d && d.over && !window._endgame_shown) {
+                                    window._endgame_shown = true;
+                                    try {
+                                        if (d.result_type === 'win') {
+                                                // Prefer server-provided username, fall back to DOM values.
+                                                // If username is not available, display the color instead.
+                                                let winnerName = (d && d.result_winner_username) ? d.result_winner_username : null;
+                                                try {
+                                                    if (!winnerName && d && d.result_winner_id) {
+                                                        if (document.getElementById('white-player-id') && parseInt(document.getElementById('white-player-id').value,10) === d.result_winner_id) {
+                                                            winnerName = document.getElementById('white-player-username').value || null;
+                                                        } else if (document.getElementById('black-player-id') && parseInt(document.getElementById('black-player-id').value,10) === d.result_winner_id) {
+                                                            winnerName = document.getElementById('black-player-username').value || null;
+                                                        }
+                                                    }
+                                                } catch (e) {}
+                                                let msg;
+                                                if (winnerName) {
+                                                    msg = `Checkmate. ${winnerName} wins.`;
+                                                } else {
+                                                    // Fallback to reporting color
+                                                    let color = 'unknown';
+                                                    try {
+                                                        if (d && d.result_winner_id) {
+                                                            const wid = d.result_winner_id;
+                                                            const wIdEl = document.getElementById('white-player-id');
+                                                            const bIdEl = document.getElementById('black-player-id');
+                                                            if (wIdEl && parseInt(wIdEl.value,10) === wid) color = 'white';
+                                                            else if (bIdEl && parseInt(bIdEl.value,10) === wid) color = 'black';
+                                                        }
+                                                    } catch (e) {}
+                                                    msg = `Checkmate by ${color}.`;
+                                                }
+                                            try { window.writeConsole(msg); } catch(e) { console.log(msg); }
+                                        } else if (d.result_type === 'draw') {
+                                            // Prefer server-provided draw reason when available
+                                            const reason = d && d.result_draw_reason ? d.result_draw_reason : null;
+                                            let msg = 'Game drawn.';
+                                            if (reason === '50-move') msg = 'Draw by 50-move rule.';
+                                            else if (reason === 'threefold') msg = 'Draw by threefold repetition.';
+                                            else if (reason === 'no-legal-moves') msg = 'Draw by no legal moves (stalemate).';
+                                            else if (reason === 'stalemate') msg = 'Stalemate (draw).';
+                                            try { window.writeConsole(msg); } catch(e) { console.log(msg); }
+                                        } else {
+                                            try { window.writeConsole('Game over.'); } catch(e) { console.log('Game over.'); }
+                                        }
+                                    } catch (e) { console.error('endgame display failed', e); }
+                                }
+                            } catch (e) { console.error('rematch UI update failed', e); }
+                                // If this client was the first to join, the initial render
+                                // may have set `game-full` to false. When the server reports
+                                // both `white_id` and `black_id`, populate the board and
+                                // enable move handling for the appropriate user.
+                                try {
+                                    const gameFullEl = document.getElementById('game-full');
+                                    const wasFull = gameFullEl ? (gameFullEl.value === 'true') : false;
+                                    const bothPresent = (d.white_id !== null && d.black_id !== null);
+                                    if (bothPresent && !wasFull) {
+                                        console.log('Detected game became full; populating board');
+                                        if (gameFullEl) gameFullEl.value = 'true';
+                                        // Update user-color if this client was assigned in the meantime
+                                        const curUserEl = document.getElementById('current-user-id');
+                                        const userColorEl = document.getElementById('user-color');
+                                        const curId = curUserEl ? parseInt(curUserEl.value, 10) : null;
+                                        if (curId !== null && userColorEl) {
+                                            if (d.white_id === curId) userColorEl.value = 'white';
+                                            else if (d.black_id === curId) userColorEl.value = 'black';
+                                            else userColorEl.value = 'spectator';
+                                        }
+                                        // Update white-turn hidden field
+                                        const whiteTurnEl = document.getElementById('white-turn');
+                                        if (whiteTurnEl) whiteTurnEl.value = d.white_turn ? 'true' : 'false';
+                                        // Re-populate the DOM board now that both players are present
+                                        try {
+                                            board.see_board();
+                                            if (typeof renderPieces === 'function') renderPieces();
+                                        } catch (e) { console.error('Error re-populating board after full join:', e); }
+                                        // If the client is now the active player, start move handling
+                                        try {
+                                            board.active_player = d.white_turn ? board.white : board.black;
+                                            const userColorElNow = document.getElementById('user-color');
+                                            const userColorNow = userColorElNow ? userColorElNow.value : 'spectator';
+                                            if (userColorNow === 'white') board.user = board.white;
+                                            else if (userColorNow === 'black') board.user = board.black;
+                                            else board.user = null;
+                                            if (board.user !== null && board.user === board.active_player) {
+                                                console.log('Starting move_handling after game became full');
+                                                board.move_handling().catch(e => console.error('move_handling error:', e));
+                                            }
+                                        } catch (e) {
+                                            console.error('Error starting move loop after game became full:', e);
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.error('Error processing full-game transition:', e);
+                                }
+                                // Always check after polling whether this client should start move handling
+                                try {
+                                    const b = window.board || (typeof board !== 'undefined' ? board : null);
+                                    if (!b) {
+                                        console.log('No board available yet when checking for move_handling start');
+                                    } else {
+                                        b.active_player = d.white_turn ? b.white : b.black;
+                                        const userColorElNow = document.getElementById('user-color');
+                                        const userColorNow = userColorElNow ? userColorElNow.value : 'spectator';
+                                        if (userColorNow === 'white') b.user = b.white;
+                                        else if (userColorNow === 'black') b.user = b.black;
+                                        else b.user = null;
+                                        if (b.user !== null && b.user === b.active_player && !b._move_handling_running) {
+                                            console.log("Starting move_handling because it is now this client's turn (poll)");
+                                            b.move_handling().catch(e => console.error('move_handling error:', e));
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.error('Error starting move loop after poll:', e);
+                                }
+                        }).catch(e => console.error('game_state poll failed', e));
+                    };
+                    doFetchState();
+                    pollTimer = setInterval(doFetchState, 1500);
+                })();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+﻿<!DOCTYPE html>
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial_scale=1.0" />
+    <title>Register</title>
+</head>
+<body>
+    <div class="container mt-5">
+        <form class="col-6 mx-auto card p-3 shadow-lg" method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            <h3>Register</h3>
+            <hr>
+            {% if messages %}
+            <div class="alert alert-primary" role="alert">
+                {% for message in messages %}
+                {{ message }}
+                {% endfor %}
+            </div>
+            {% endif %}
+            <div class="form-group">
+                <label for="exampleFirstName">First Name:</label>
+                <input type="text" name="firstName" class="form-group" id="exampleFirstName" aria-describedby="firstNameHelp" placeholder="Enter First Name" required />
+            </div>
+            <div class="form-group">
+                <label for="exampleLastName">Last Name:</label>
+                <input type="text" name="lastName" class="form-group" id="exampleLastName" aria-describedby="lastNameHelp" placeholder="Enter Last Name" required />
+            </div>
+            <div class="form-group">
+                <label for="exampleUsername">Username:</label>
+                <input type="text" name="username" class="form-group" id="exampleUsername" aria-describedby="usernameHelp" placeholder="Enter Username" required />
+            </div>
+            <div class="form-group">
+                <label for="exampleEmail">Email:</label>
+                <input type="text" name="email" class="form-group" id="exampleEmail" aria-describedby="emailHelp" placeholder="Enter Email" required />
+            </div>
+            <div class="form-group">
+                <label for="examplePassword">Password:</label>
+                <input type="text" name="password" class="form-group" id="examplePassword" aria-describedby="passwordHelp" placeholder="Enter Password" required />
+            </div>
+            <button type="submit" class="btn btn-primary">Submit</button>
+            <p>Already have an account? <a href="/login/">Log in</a> </p>
+        </form>
+    </div>
+</body>
+</html>
