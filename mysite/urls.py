@@ -17,7 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path,include
 from django.urls import path,include
-from users.views import *
+from chess_game.views import *
 from django.conf import settings
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.conf.urls.static import static
@@ -26,7 +26,7 @@ from django.conf.urls.static import static
 urlpatterns = [
     path('',index,name="index"),
     path('admin/', admin.site.urls),
-    path('users/', include("users.urls")),
+    path('users/', include("chess_game.urls")),
     path('home/', home, name="home"),
     path('game/<int:game_id>/', game, name='game_view'),
     path('leave/', leave_game, name='leave_game'),

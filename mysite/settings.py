@@ -31,7 +31,7 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
-    'users.apps.UsersConfig',
+    'chess_game',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -40,8 +40,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 ]
 
-# Use custom user model defined in `users.models.CustomUser`
-AUTH_USER_MODEL = 'users.CustomUser'
+# Use custom user model defined in `chess_game.models.CustomUser`
+AUTH_USER_MODEL = 'chess_game.CustomUser'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

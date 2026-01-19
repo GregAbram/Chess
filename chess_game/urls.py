@@ -2,7 +2,7 @@ from django.urls import path
 from django.contrib import admin
 from . import views
 from django.urls import path,include
-from users.views import *
+from chess_game.views import *
 from django.conf import settings
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.conf.urls.static import static
