@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-hsuapl_q7rceqf63i!pmm*%c(8h72-cf(jmc(1d32!zz(2q+*k
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ['jackschess.org']
+ALLOWED_HOSTS = ['jackschess.org', 'chess-0yak.onrender.com']
 
 
 # Application definition
