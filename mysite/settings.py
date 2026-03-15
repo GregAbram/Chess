@@ -121,7 +121,8 @@ STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Login URL for @login_required redirects
-LOGIN_URL = '/login/'STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+LOGIN_URL = '/login/'
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
