@@ -7,3 +7,4 @@ packaging==26.0
 sqlparse==0.5.5
 typing-extensions==4.15.0
 whitenoise==6.11.0
+psycopg2-binary
