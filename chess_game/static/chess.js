@@ -661,20 +661,20 @@ class Board {
         }
     }
     move_piece(fromSquare, toSquare) {
-        // First handle castling: user's convention — `toSquare` is the rook's original square
-        if (fromSquare.piece.type == PieceType.KING && toSquare.piece.color == fromSquare.piece.color) {
+        // Detect castling: king moves exactly 2 columns and has not yet moved
+        if (fromSquare.piece.type == PieceType.KING && !fromSquare.piece.moved && Math.abs(toSquare.col - fromSquare.col) == 2) {
             const fromRow = fromSquare.row;
             const fromCol = fromSquare.col;
 
             if (toSquare.col > fromCol) {
-                // Kingside: king -> 6, rook (toSquare) -> 5
+                // Kingside: king lands on col 6, rook moves from col 7 to col 5
                 let kingDest = this.squares[fromRow][6];
                 kingDest.piece = fromSquare.piece;
                 fromSquare.piece = new NullPiece();
                 kingDest.piece.moved = true;
                 kingDest.piece.see_board(this.squares, kingDest.row, kingDest.col);
 
-                let rookFrom = toSquare; // rook's original square
+                let rookFrom = this.squares[fromRow][7]; // kingside rook's original square
                 let rookTo = this.squares[fromRow][5];
                 rookTo.piece = rookFrom.piece;
                 rookFrom.piece = new NullPiece();
@@ -682,14 +682,14 @@ class Board {
                 rookTo.piece.see_board(this.squares, rookTo.row, rookTo.col);
             }
             else {
-                // Queenside: king -> 2, rook (toSquare) -> 3
+                // Queenside: king lands on col 2, rook moves from col 0 to col 3
                 let kingDest = this.squares[fromRow][2];
                 kingDest.piece = fromSquare.piece;
                 fromSquare.piece = new NullPiece();
                 kingDest.piece.moved = true;
                 kingDest.piece.see_board(this.squares, kingDest.row, kingDest.col);
 
-                let rookFrom = toSquare; // rook's original square
+                let rookFrom = this.squares[fromRow][0]; // queenside rook's original square
                 let rookTo = this.squares[fromRow][3];
                 rookTo.piece = rookFrom.piece;
                 rookFrom.piece = new NullPiece();
